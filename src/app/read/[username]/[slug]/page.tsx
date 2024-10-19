@@ -2,6 +2,8 @@
 
 import { graphql } from 'src/packages/omnivore/gql'
 import { useMutation, useQuery } from 'urql'
+import { v4 as uuidv4 } from 'uuid'
+import { nanoid } from 'nanoid'
 import { Pager } from 'src/packages/pager'
 import clsx from 'clsx'
 import { useGlobalConfig } from 'src/packages/useSettings'
@@ -48,6 +50,44 @@ const SaveArticleReadingProgress = graphql(/* GraphQL */ `
       ... on SaveArticleReadingProgressError {
         errorCodes
       }
+    }
+  }
+`)
+
+const CreateHighlight = graphql(/* GraphQL */ `
+  mutation CreateHighlight($input: CreateHighlightInput!) {
+    createHighlight(input: $input) {
+      ... on CreateHighlightSuccess {
+        highlight {
+          ...HighlightFields
+        }
+      }
+      ... on CreateHighlightError {
+        errorCodes
+      }
+    }
+  }
+  fragment HighlightFields on Highlight {
+    id
+    type
+    shortId
+    quote
+    prefix
+    suffix
+    patch
+    color
+    annotation
+    createdByMe
+    createdAt
+    updatedAt
+    sharedAt
+    highlightPositionPercent
+    highlightPositionAnchorIndex
+    labels {
+      id
+      name
+      color
+      createdAt
     }
   }
 `)
@@ -100,11 +140,13 @@ export default function Page({ params }: { params: { slug: string; username: str
   const id = useMemo(() => {
     return data?.article.__typename === 'ArticleSuccess' ? data.article.article.id : null
   }, [data])
+
   const handlePageChange = useSaveArticleReadingProgress(id)
 
+  const [, createHighlightMutation] = useMutation(CreateHighlight)
+
   if (data?.article.__typename === 'ArticleSuccess') {
-    const { title, url, siteName, savedAt, author, id, readingProgressPercent } =
-      data?.article.article
+    const { title, url, siteName, savedAt, author, id, readingProgressPercent } = data.article.article
 
     return (
       <Pager
@@ -114,17 +156,58 @@ export default function Page({ params }: { params: { slug: string; username: str
         padding={config.padding || 'p-2'}
         columnsPerPage={config.columns || 1}
       >
-        <div className='prose'>
-          <h1 className='font-sans'>{title}</h1>
+        <div className="prose">
+          <h1 className="font-sans">{title}</h1>
           <p>
             {formatDistanceToNow(new Date(savedAt))} ago • {author && `${author} • `}
-            <a href={url} target='_blank'>
+            <a href={url} target="_blank">
               {siteName}
             </a>
           </p>
         </div>
 
         <article
+          onDoubleClick={(e) => {
+            const target = e.target as HTMLElement
+
+            const elem = target.closest(
+              '[data-omnivore-anchor-idx], p, code, pre, ul, ol, h1, h2, h3, h4, h5, h6'
+            ) as HTMLElement
+
+            if (!elem) return
+
+            elem.style.setProperty('background-color', 'rgb(229 231 235)', 'important')
+            elem.style.setProperty('cursor', 'pointer', 'important')
+
+            document.addEventListener(
+              'click',
+              async (e) => {
+                try {
+                  if (!elem.contains(e.target as HTMLElement)) return
+
+                  await createHighlightMutation({
+                    input: {
+                      id: uuidv4(),
+                      shortId: nanoid(8),
+                      type: 'HIGHLIGHT' as any,
+                      color: 'yellow',
+                      prefix: '',
+                      suffix: ' ',
+                      quote: elem.textContent,
+                      // html: str,
+                      articleId: id,
+                    },
+                  })
+                } catch (err) {
+                  console.log(err)
+                } finally {
+                  elem.style?.removeProperty('background-color')
+                  elem.style?.removeProperty('cursor')
+                }
+              },
+              { once: true }
+            )
+          }}
           className={clsx(
             'prose prose-gray max-w-none',
             // font size
@@ -140,7 +223,6 @@ export default function Page({ params }: { params: { slug: string; username: str
             'prose-code:font-mono',
             'prose-pre:inline prose-pre:p-0 prose-pre:bg-transparent prose-pre:text-black',
             // 'prose-pre:bg-gray-200 prose-pre:text-black',
-
 
             // underline style
             'prose-a:underline-offset-4 prose-a:decoration-1 prose-a:decoration-dotted',
